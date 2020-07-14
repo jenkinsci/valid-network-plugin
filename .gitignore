@@ -1,0 +1,7 @@
+valid-cli-plugin/bin
+valid-cli-plugin/work
+valid-cli-plugin/target
+valid-cli-plugin/.classpath
+valid-cli-plugin/.project
+valid-cli-plugin/.settings
+.metadata
