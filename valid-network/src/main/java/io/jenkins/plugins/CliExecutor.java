@@ -82,7 +82,7 @@ public class CliExecutor extends Builder implements SimpleBuildStep {
 
 	private void configHost() throws IOException {
 		print("Setting up config host");
-		this.cliExecute("config --host localhost:44220");
+		this.cliExecute("config --host console.valid.network");
 	}
 
 	private void login() throws IOException {
