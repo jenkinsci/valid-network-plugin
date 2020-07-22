@@ -1,7 +1,7 @@
-valid-network/bin
-valid-network/work
-valid-network/target
-valid-network/.classpath
-valid-network/.project
-valid-network/.settings
+bin
+work
+target
+.classpath
+.project
+.settings
 .metadata
