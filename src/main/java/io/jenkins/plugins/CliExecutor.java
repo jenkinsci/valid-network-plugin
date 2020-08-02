@@ -1,11 +1,14 @@
 package io.jenkins.plugins;
 
-import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.util.ArrayList;
+import java.util.List;
 
 import hudson.FilePath;
 import hudson.Launcher;
+import hudson.Launcher.ProcStarter;
+import hudson.Proc;
 import hudson.model.AbstractProject;
 import hudson.model.Run;
 import hudson.model.TaskListener;
@@ -13,16 +16,19 @@ import hudson.tasks.Builder;
 import hudson.Extension;
 import hudson.tasks.BuildStepDescriptor;
 import jenkins.tasks.SimpleBuildStep;
+import hudson.util.ArgumentListBuilder;
+import hudson.util.Secret;
 
 import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
 
 public class CliExecutor extends Builder implements SimpleBuildStep {
 	private final String username;
-	private final String password;
 	private final String filepath;
 	private final String projectId;
-
+	private final Secret password;
+	private Launcher launcher;
+	
 	private String cliExec;
 	private TaskListener listener;
 
@@ -37,74 +43,75 @@ public class CliExecutor extends Builder implements SimpleBuildStep {
 	@DataBoundConstructor
 	public CliExecutor(String username, String password, String projectId, String filepath) {
 		this.username = username;
-		this.password = password;
 		this.filepath = filepath;
 		this.projectId = projectId;
+		this.password = Secret.fromString(password);
 	}
 
 	private boolean isWin() {
-		return System.getProperty("os.name").toLowerCase().startsWith("windows");
+		return hudson.Functions.isWindows();
 	}
 
 	private void print(String msg) {
 		this.listener.getLogger().println(msg);
 	}
 
-	private void cliExecute(String cmd) throws IOException {
+	private void cliExecute(String ...cmd) throws IOException, InterruptedException {
 		String cwd = System.getProperty("user.dir");
-		String execCmd = this.isWin() ? 
-				cwd + "\\src\\main\\resources\\binaries\\" + this.cliExec + " " + cmd : 
-				cwd + "/src/main/resources/binaries/" + this.cliExec + " " + cmd;
+		String cliExecPath = this.isWin() ? 
+				cwd + "\\src\\main\\resources\\binaries\\" + this.cliExec : 
+				cwd + "/src/main/resources/binaries/" + this.cliExec;
 		
-		Process proc = Runtime.getRuntime().exec(execCmd);
-
-		BufferedReader stdInput = new BufferedReader(new InputStreamReader(proc.getInputStream()));
-		BufferedReader stdError = new BufferedReader(new InputStreamReader(proc.getErrorStream()));
-
-		String stdout = "";
-		String stderr = "";
-
-		String s = null;
-		while ((s = stdInput.readLine()) != null) {
-			stdout += s;
+		ProcStarter ps = this.launcher.launch();
+		
+		List<String> cmdList = new ArrayList<String>();
+		cmdList.add(cliExecPath);
+		for (String str: cmd) {
+			cmdList.add(str);
 		}
-
-		while ((s = stdError.readLine()) != null) {
-			stderr += s;
+		
+		ArgumentListBuilder args = new ArgumentListBuilder();
+		args.add(cmdList);
+		
+		ByteArrayOutputStream out = new ByteArrayOutputStream();
+		ByteArrayOutputStream err = new ByteArrayOutputStream();
+		
+		Proc proc = launcher.launch(ps.cmds(args).stdout(out).stderr(err));
+		
+		int exitCode = proc.join();
+		if (exitCode == 0) {
+			print(out.toString());
 		}
-
-		if (!stderr.equals("")) {
-			throw new IOException(stderr);
-		} else {
-			print(stdout);
+		else {
+			throw new IOException(err.toString());
 		}
 	}
 
-	private void configHost() throws IOException {
+	private void configHost() throws IOException, InterruptedException {
 		print("Setting up config host");
-		this.cliExecute("config --host console.valid.network");
+		this.cliExecute("config", "--host", "console.valid.network");
 	}
 
-	private void login() throws IOException {
+	private void login() throws IOException, InterruptedException {
 		print("Logging in...");
-		this.cliExecute("login -u " + this.username + " -p " + this.password);
+		this.cliExecute("login", "-u", this.username, "-p", Secret.toString(this.password));
 	}
 	
-	private void createDraft() throws IOException {
+	private void createDraft() throws IOException, InterruptedException {
 		print("Creating draft");
-		this.cliExecute("projectsRegistry projects projectId newDraft set --projectId " + this.projectId);
+		this.cliExecute("projectsRegistry", "projects", "projectId", "newDraft", "set", "--projectId", this.projectId);
 	}
 	
-	private void addFile() throws IOException {
+	private void addFile() throws IOException, InterruptedException {
 		print("Adding file " + this.filepath);
-		this.cliExecute("drafts projects files set --projectId " + this.projectId + " --filepath " + "\"" + this.filepath + "\"");
+		this.cliExecute("drafts", "projects", "files", "set", "--projectId", this.projectId, "--filepath", "\"" + this.filepath + "\"");
 	}
 	
-	private void finishUpload() throws IOException {
+	private void finishUpload() throws IOException, InterruptedException {
 		print("Finishing upload");
-		this.cliExecute("drafts projects get --projectId " + this.projectId);
-		this.cliExecute("drafts projects set --projectId " + this.projectId + " --commit --commitAmount 1 --compilerVersion 0.4.25 --keepHistory");
-		this.cliExecute("projectsRegistry projects projectId details get --projectId " + this.projectId);
+		this.cliExecute("drafts", "projects", "get", "--projectId", this.projectId);
+		this.cliExecute("drafts", "projects", "set", "--projectId", this.projectId,  "--commit", "--commitAmount", "1", "--compilerVersion", "0.4.25", "--keepHistory");
+		this.cliExecute("projectsRegistry", "projects", "projectId", "details", "get", "--projectId", this.projectId);
 		print("Completed file upload as new package");
 	}
 
@@ -112,6 +119,7 @@ public class CliExecutor extends Builder implements SimpleBuildStep {
 	public void perform(Run<?, ?> run, FilePath workspace, Launcher launcher, TaskListener listener)
 			throws InterruptedException, IOException {
 
+		this.launcher = launcher;
 		this.listener = listener;
 		this.cliExec = this.isWin() ? "valid-network-cli-tool.exe" : "valid-network-cli-tool";
 		this.configHost();
@@ -121,7 +129,7 @@ public class CliExecutor extends Builder implements SimpleBuildStep {
 		this.finishUpload();
 	}
 
-	@Symbol("greet")
+	@Symbol("validNetwork")
 	@Extension
 	public static class DescriptorImpl extends BuildStepDescriptor<Builder> {
 
