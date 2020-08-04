@@ -2,6 +2,7 @@ package io.jenkins.plugins;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -80,10 +81,10 @@ public class CliExecutor extends Builder implements SimpleBuildStep {
 		
 		int exitCode = proc.join();
 		if (exitCode == 0) {
-			print(out.toString());
+			print(new String(out.toByteArray(), "UTF-8"));
 		}
 		else {
-			throw new IOException(err.toString());
+			throw new IOException(new String(err.toByteArray(), "UTF-8"));
 		}
 	}
 
